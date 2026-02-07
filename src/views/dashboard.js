@@ -1,3 +1,4 @@
+// dashboard.js
 import { signOut } from "firebase/auth";
 import {
   collection,
@@ -200,7 +201,6 @@ export function showDashboard(role) {
         estimasiMenit: 10,
         urutan: 0,
         publish: false,
-        // ✅ resetVersion default (opsional). kalau tidak ada juga aman, tapi ini bikin rapi.
         resetVersion: 0,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
@@ -303,6 +303,20 @@ function setTopbarInfo({ judul, kelas, bab, publish }) {
   }
 }
 
+// ✅ Rangkai content otomatis supaya Android tetap baca "content"
+function buildTextContent(deskripsi, rumus, contohSoal) {
+  const parts = [];
+  const d = String(deskripsi || "").trim();
+  const r = String(rumus || "").trim();
+  const c = String(contohSoal || "").trim();
+
+  if (d) parts.push(d);
+  if (r) parts.push("Rumus:\n" + r);
+  if (c) parts.push("Contoh soal:\n" + c);
+
+  return parts.join("\n\n");
+}
+
 function selectMateri(materiId) {
   selectedMateriId = materiId;
   setDetailVisible(true);
@@ -378,7 +392,7 @@ function selectMateri(materiId) {
       await setDoc(
         materiRef,
         {
-         resetVersion: increment(1),
+          resetVersion: increment(1),
           updatedAt: serverTimestamp()
         },
         { merge: true }
@@ -427,6 +441,12 @@ function listenSections(materiId) {
       const s = d.data();
       const type = s.type || "text";
 
+      // preview: untuk text pakai content (hasil rangkai), untuk quiz pakai question
+      const preview =
+        type === "quiz"
+          ? String(s.question || "").slice(0, 80)
+          : String(s.content || s.deskripsi || "").slice(0, 80);
+
       const card = document.createElement("div");
       card.className = "sec";
 
@@ -442,9 +462,7 @@ function listenSections(materiId) {
               ${typePill}
               <div class="sec-title">#${escapeHtml(String(s.order ?? 0))} • ${escapeHtml(s.title || "Tanpa Judul")}</div>
             </div>
-            <div class="muted small sec-sub">
-              ${type === "quiz" ? escapeHtml((s.question || "").slice(0, 80)) : escapeHtml((s.content || "").slice(0, 80))}
-            </div>
+            <div class="muted small sec-sub">${escapeHtml(preview)}</div>
           </div>
 
           <div class="sec-actions">
@@ -460,7 +478,7 @@ function listenSections(materiId) {
               <input class="sOrder" type="number" value="${escapeAttr(String(s.order ?? 0))}" />
             </div>
             <div>
-              <label>Title</label>
+              <label>Judul Section</label>
               <input class="sTitle" value="${escapeAttr(s.title || "")}" />
             </div>
           </div>
@@ -468,8 +486,18 @@ function listenSections(materiId) {
           ${
             type === "text"
               ? `
-                <label>Content (Text)</label>
-                <textarea class="sContent" rows="7">${escapeHtml(s.content || "")}</textarea>
+                <label>Deskripsi</label>
+                <textarea class="sDesc" rows="4">${escapeHtml(s.deskripsi ?? s.desc ?? s.content ?? "")}</textarea>
+
+                <label>Rumus</label>
+                <textarea class="sRumus" rows="4">${escapeHtml(s.rumus ?? "")}</textarea>
+
+                <label>Contoh Soal</label>
+                <textarea class="sContoh" rows="5">${escapeHtml(s.contohSoal ?? s.contoh ?? "")}</textarea>
+
+                <div class="muted small" style="margin-top:10px;">
+                  Catatan: di aplikasi, konten akan dirangkai otomatis dari Deskripsi + Rumus + Contoh Soal.
+                </div>
               `
               : `
                 <label>Question</label>
@@ -490,7 +518,11 @@ function listenSections(materiId) {
                 </div>
 
                 <label>Explain</label>
-                <textarea class="sExplain" rows="4">${escapeHtml(s.explain || "")}</textarea>
+                <textarea class="sExplain" rows="4">${escapeHtml(s.explanation || s.explain || "")}</textarea>
+
+                <div class="muted small" style="margin-top:10px;">
+                  Explain akan dipakai aplikasi saat jawaban salah jika Hint kosong.
+                </div>
               `
           }
 
@@ -525,14 +557,29 @@ function listenSections(materiId) {
           };
 
           if (type === "text") {
-            payload.content = card.querySelector(".sContent").value;
+            const deskripsi = card.querySelector(".sDesc").value;
+            const rumus = card.querySelector(".sRumus").value;
+            const contohSoal = card.querySelector(".sContoh").value;
+
+            payload.deskripsi = deskripsi;     // field baru
+            payload.rumus = rumus;             // field baru
+            payload.contohSoal = contohSoal;   // field baru
+
+            // ✅ tetap simpan content agar Android tetap bisa tampil tanpa ubah kode
+            payload.content = buildTextContent(deskripsi, rumus, contohSoal);
+
           } else {
             const optionsRaw = card.querySelector(".sOptions").value || "";
+            const explainText = card.querySelector(".sExplain").value;
+
             payload.question = card.querySelector(".sQuestion").value;
             payload.options = optionsRaw.split("\n").map((x) => x.trim()).filter(Boolean);
             payload.answerIndex = parseInt(card.querySelector(".sAnswer").value || "0", 10);
             payload.hint = card.querySelector(".sHint").value.trim();
-            payload.explain = card.querySelector(".sExplain").value;
+
+            // ✅ simpan dua-duanya biar kompatibel (Android baca "explanation")
+            payload.explanation = explainText;
+            payload.explain = explainText;
           }
 
           await setDoc(doc(db, "materi", materiId, "sections", d.id), payload, { merge: true });
@@ -555,7 +602,12 @@ async function addSectionText(materiId) {
     await addDoc(collection(db, "materi", materiId, "sections"), {
       type: "text",
       order: 0,
-      title: "Section Text",
+      title: "Materi",
+      // field baru:
+      deskripsi: "",
+      rumus: "",
+      contohSoal: "",
+      // field lama (kompatibilitas Android):
       content: "",
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
@@ -576,6 +628,9 @@ async function addSectionQuiz(materiId) {
       options: ["A", "B", "C", "D"],
       answerIndex: 0,
       hint: "",
+      // ✅ simpan yang dipakai Android:
+      explanation: "",
+      // ✅ tetap simpan lama juga (biar aman kalau ada kode lama):
       explain: "",
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
