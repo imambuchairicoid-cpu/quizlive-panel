@@ -314,11 +314,12 @@ function buildTextContent(deskripsi, rumus, contohSoal) {
   const c = String(contohSoal || "").trim();
 
   if (d) parts.push(d);
-  if (r) parts.push("Rumus:\n" + r);
-  if (c) parts.push("Contoh soal:\n" + c);
+  if (r) parts.push(r);          // ✅ tanpa "Rumus:"
+  if (c) parts.push(c);          // ✅ tanpa "Contoh soal:"
 
   return parts.join("\n\n");
 }
+
 
 function selectMateri(materiId) {
   selectedMateriId = materiId;
