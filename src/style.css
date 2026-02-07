@@ -520,3 +520,10 @@ input:focus, textarea:focus{
   .content{ padding:14px; }
   .grid2{ grid-template-columns: 1fr; }
 }
+
+.btn.warn{
+  background:#FFB300;
+  border-color:transparent;
+  color:#111;
+  font-weight:700;
+}
