@@ -9,7 +9,7 @@ import {
   orderBy,
   serverTimestamp,
   setDoc,
-  FieldValue
+  increment
 } from "firebase/firestore";
 
 import { auth, db } from "../firebase";
@@ -378,7 +378,7 @@ function selectMateri(materiId) {
       await setDoc(
         materiRef,
         {
-          resetVersion: FieldValue.increment(1),
+         resetVersion: increment(1),
           updatedAt: serverTimestamp()
         },
         { merge: true }
