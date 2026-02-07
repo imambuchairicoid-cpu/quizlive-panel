@@ -10,7 +10,10 @@ import {
   orderBy,
   serverTimestamp,
   setDoc,
-  increment
+  increment,
+  getDocs,
+  limit,
+  writeBatch
 } from "firebase/firestore";
 
 import { auth, db } from "../firebase";
@@ -130,7 +133,6 @@ export function showDashboard(role) {
               <label>Deskripsi</label>
               <textarea id="mDesc" rows="3"></textarea>
 
-              <!-- ✅ tombol reset ditaruh sebelah simpan -->
               <div class="row gap" style="justify-content:flex-start; margin-top:12px;">
                 <button id="btnSaveMateri" class="btn primary">Simpan</button>
                 <button id="btnResetProgress" class="btn">Reset Progress</button>
@@ -150,9 +152,10 @@ export function showDashboard(role) {
             </div>
 
             <div id="sectionWrap" class="hidden">
-              <div class="row gap" style="justify-content:flex-start;">
+              <div class="row gap" style="justify-content:flex-start; flex-wrap:wrap;">
                 <button id="btnAddText" class="btn">+ Section Text</button>
                 <button id="btnAddQuiz" class="btn">+ Section Quiz</button>
+                <button id="btnTemplate" class="btn warn">⚡ Generate Template</button>
               </div>
 
               <div id="sectionsList" class="sections-list"></div>
@@ -320,8 +323,6 @@ function buildTextContent(deskripsi, rumus, contohSoal) {
 function selectMateri(materiId) {
   selectedMateriId = materiId;
   setDetailVisible(true);
-
-  // refresh active marker list
   renderMateriList();
 
   if (unsubMateriDoc) unsubMateriDoc();
@@ -365,14 +366,12 @@ function selectMateri(materiId) {
         },
         { merge: true }
       );
-
       toast("Materi disimpan");
     } catch (e) {
       toast("Gagal simpan: " + (e?.message || "unknown"));
     }
   };
 
-  // ✅ RESET PROGRESS: increment resetVersion
   qs("#btnResetProgress").onclick = async () => {
     if (!selectedMateriId) {
       toast("Pilih materi dulu");
@@ -381,10 +380,7 @@ function selectMateri(materiId) {
 
     const ok = confirm(
       "Reset progress siswa untuk materi ini?\n\n" +
-      "Efek:\n" +
-      "- Semua siswa dianggap mulai dari 0%\n" +
-      "- Jawaban tersimpan versi lama tidak dipakai lagi\n\n" +
-      "Lanjut reset?"
+      "Efek:\n- Semua siswa dianggap mulai dari 0%\n- Jawaban versi lama tidak dipakai\n\nLanjut reset?"
     );
     if (!ok) return;
 
@@ -397,7 +393,6 @@ function selectMateri(materiId) {
         },
         { merge: true }
       );
-
       toast("✅ Progress siswa berhasil direset");
     } catch (e) {
       toast("Gagal reset: " + (e?.message || "unknown"));
@@ -423,7 +418,90 @@ function selectMateri(materiId) {
   qs("#btnAddText").onclick = () => addSectionText(materiId);
   qs("#btnAddQuiz").onclick = () => addSectionQuiz(materiId);
 
+  // ✅ Generate Template
+  qs("#btnTemplate").onclick = () => generateTemplate(materiId);
+
   listenSections(materiId);
+}
+
+async function generateTemplate(materiId) {
+  if (!materiId) return;
+
+  const ok = confirm(
+    "Generate Template untuk materi ini?\n\n" +
+    "Akan menambahkan:\n" +
+    "- Pengertian (Text)\n" +
+    "- Rumus (Text)\n" +
+    "- Contoh Soal (Text)\n" +
+    "- Cek Pemahaman 1 (Quiz)\n" +
+    "- Cek Pemahaman 2 (Quiz)\n\n" +
+    "Template hanya MENAMBAH section, tidak menghapus."
+  );
+  if (!ok) return;
+
+  try {
+    const sectionsCol = collection(db, "materi", materiId, "sections");
+
+    // cari order terbesar
+    const lastQ = query(sectionsCol, orderBy("order", "desc"), limit(1));
+    const lastSnap = await getDocs(lastQ);
+
+    let maxOrder = -10;
+    lastSnap.forEach((x) => {
+      const v = x.data()?.order;
+      const n = typeof v === "number" ? v : parseInt(String(v ?? "0"), 10);
+      if (!Number.isNaN(n)) maxOrder = n;
+    });
+
+    // mulai dari kelipatan 10 supaya gampang sisip
+    const base = maxOrder >= 0 ? Math.ceil((maxOrder + 1) / 10) * 10 : 0;
+
+    const batch = writeBatch(db);
+    const now = serverTimestamp();
+
+    const makeText = (order, title, deskripsi = "", rumus = "", contohSoal = "") => {
+      const ref = doc(sectionsCol);
+      batch.set(ref, {
+        type: "text",
+        order,
+        title,
+        deskripsi,
+        rumus,
+        contohSoal,
+        content: buildTextContent(deskripsi, rumus, contohSoal), // ✅ untuk Android
+        createdAt: now,
+        updatedAt: now
+      });
+    };
+
+    const makeQuiz = (order, title) => {
+      const ref = doc(sectionsCol);
+      batch.set(ref, {
+        type: "quiz",
+        order,
+        title,
+        question: "",
+        options: ["A", "B", "C", "D"],
+        answerIndex: 0,
+        hint: "",
+        explanation: "",
+        explain: "",
+        createdAt: now,
+        updatedAt: now
+      });
+    };
+
+    makeText(base + 0,  "Pengertian", "Tulis pengertian singkat dan mudah dipahami.", "", "");
+    makeText(base + 10, "Rumus", "", "Tulis rumus inti di sini.", "");
+    makeText(base + 20, "Contoh Soal", "", "", "Tulis 1–2 contoh soal beserta langkah singkat.");
+    makeQuiz(base + 30, "Cek Pemahaman 1");
+    makeQuiz(base + 40, "Cek Pemahaman 2");
+
+    await batch.commit();
+    toast("✅ Template berhasil dibuat");
+  } catch (e) {
+    toast("Gagal generate template: " + (e?.message || "unknown"));
+  }
 }
 
 function listenSections(materiId) {
@@ -441,7 +519,6 @@ function listenSections(materiId) {
       const s = d.data();
       const type = s.type || "text";
 
-      // preview: untuk text pakai content (hasil rangkai), untuk quiz pakai question
       const preview =
         type === "quiz"
           ? String(s.question || "").slice(0, 80)
@@ -521,7 +598,7 @@ function listenSections(materiId) {
                 <textarea class="sExplain" rows="4">${escapeHtml(s.explanation || s.explain || "")}</textarea>
 
                 <div class="muted small" style="margin-top:10px;">
-                  Explain akan dipakai aplikasi saat jawaban salah jika Hint kosong.
+                  Explain dipakai aplikasi saat jawaban salah jika Hint kosong.
                 </div>
               `
           }
@@ -561,13 +638,11 @@ function listenSections(materiId) {
             const rumus = card.querySelector(".sRumus").value;
             const contohSoal = card.querySelector(".sContoh").value;
 
-            payload.deskripsi = deskripsi;     // field baru
-            payload.rumus = rumus;             // field baru
-            payload.contohSoal = contohSoal;   // field baru
+            payload.deskripsi = deskripsi;
+            payload.rumus = rumus;
+            payload.contohSoal = contohSoal;
 
-            // ✅ tetap simpan content agar Android tetap bisa tampil tanpa ubah kode
             payload.content = buildTextContent(deskripsi, rumus, contohSoal);
-
           } else {
             const optionsRaw = card.querySelector(".sOptions").value || "";
             const explainText = card.querySelector(".sExplain").value;
@@ -577,7 +652,6 @@ function listenSections(materiId) {
             payload.answerIndex = parseInt(card.querySelector(".sAnswer").value || "0", 10);
             payload.hint = card.querySelector(".sHint").value.trim();
 
-            // ✅ simpan dua-duanya biar kompatibel (Android baca "explanation")
             payload.explanation = explainText;
             payload.explain = explainText;
           }
@@ -603,11 +677,9 @@ async function addSectionText(materiId) {
       type: "text",
       order: 0,
       title: "Materi",
-      // field baru:
       deskripsi: "",
       rumus: "",
       contohSoal: "",
-      // field lama (kompatibilitas Android):
       content: "",
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
@@ -628,9 +700,7 @@ async function addSectionQuiz(materiId) {
       options: ["A", "B", "C", "D"],
       answerIndex: 0,
       hint: "",
-      // ✅ simpan yang dipakai Android:
       explanation: "",
-      // ✅ tetap simpan lama juga (biar aman kalau ada kode lama):
       explain: "",
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
