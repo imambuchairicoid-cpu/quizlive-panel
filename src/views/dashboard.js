@@ -307,18 +307,22 @@ function setTopbarInfo({ judul, kelas, bab, publish }) {
 }
 
 // ✅ Rangkai content otomatis supaya Android tetap baca "content"
-function buildTextContent(deskripsi, rumus, contohSoal) {
+// ✅ Rangkai content otomatis supaya Android tetap baca "content"
+function buildTextContent(deskripsi, rumus, contohSoal, keterangan) {
   const parts = [];
   const d = String(deskripsi || "").trim();
   const r = String(rumus || "").trim();
   const c = String(contohSoal || "").trim();
+  const k = String(keterangan || "").trim();
 
   if (d) parts.push(d);
-  if (r) parts.push(r);          // ✅ tanpa "Rumus:"
-  if (c) parts.push(c);          // ✅ tanpa "Contoh soal:"
+  if (r) parts.push(r);
+  if (c) parts.push(c);
+  if (k) parts.push(k); // ✅ Keterangan paling bawah
 
   return parts.join("\n\n");
 }
+
 
 
 function selectMateri(materiId) {
@@ -460,20 +464,22 @@ async function generateTemplate(materiId) {
     const batch = writeBatch(db);
     const now = serverTimestamp();
 
-    const makeText = (order, title, deskripsi = "", rumus = "", contohSoal = "") => {
-      const ref = doc(sectionsCol);
-      batch.set(ref, {
-        type: "text",
-        order,
-        title,
-        deskripsi,
-        rumus,
-        contohSoal,
-        content: buildTextContent(deskripsi, rumus, contohSoal), // ✅ untuk Android
-        createdAt: now,
-        updatedAt: now
-      });
-    };
+    const makeText = (order, title, deskripsi = "", rumus = "", contohSoal = "", keterangan = "") => {
+  const ref = doc(sectionsCol);
+  batch.set(ref, {
+    type: "text",
+    order,
+    title,
+    deskripsi,
+    rumus,
+    contohSoal,
+    keterangan, // ✅ field baru
+    content: buildTextContent(deskripsi, rumus, contohSoal, keterangan), // ✅ untuk Android
+    createdAt: now,
+    updatedAt: now
+  });
+};
+
 
     const makeQuiz = (order, title) => {
       const ref = doc(sectionsCol);
@@ -571,11 +577,15 @@ function listenSections(materiId) {
                 <textarea class="sRumus" rows="4">${escapeHtml(s.rumus ?? "")}</textarea>
 
                 <label>Contoh Soal</label>
-                <textarea class="sContoh" rows="5">${escapeHtml(s.contohSoal ?? s.contoh ?? "")}</textarea>
+<textarea class="sContoh" rows="5">${escapeHtml(s.contohSoal ?? s.contoh ?? "")}</textarea>
 
-                <div class="muted small" style="margin-top:10px;">
-                  Catatan: di aplikasi, konten akan dirangkai otomatis dari Deskripsi + Rumus + Contoh Soal.
-                </div>
+<label>Keterangan</label>
+<textarea class="sKet" rows="3">${escapeHtml(s.keterangan ?? "")}</textarea>
+
+<div class="muted small" style="margin-top:10px;">
+  Catatan: di aplikasi, konten akan dirangkai otomatis dari Deskripsi + Rumus + Contoh Soal + Keterangan.
+</div>
+
               `
               : `
                 <label>Question</label>
@@ -636,14 +646,17 @@ function listenSections(materiId) {
 
           if (type === "text") {
             const deskripsi = card.querySelector(".sDesc").value;
-            const rumus = card.querySelector(".sRumus").value;
-            const contohSoal = card.querySelector(".sContoh").value;
+const rumus = card.querySelector(".sRumus").value;
+const contohSoal = card.querySelector(".sContoh").value;
+const keterangan = card.querySelector(".sKet").value; // ✅
 
-            payload.deskripsi = deskripsi;
-            payload.rumus = rumus;
-            payload.contohSoal = contohSoal;
+payload.deskripsi = deskripsi;
+payload.rumus = rumus;
+payload.contohSoal = contohSoal;
+payload.keterangan = keterangan; // ✅
 
-            payload.content = buildTextContent(deskripsi, rumus, contohSoal);
+payload.content = buildTextContent(deskripsi, rumus, contohSoal, keterangan); // ✅
+
           } else {
             const optionsRaw = card.querySelector(".sOptions").value || "";
             const explainText = card.querySelector(".sExplain").value;
@@ -675,16 +688,18 @@ function listenSections(materiId) {
 async function addSectionText(materiId) {
   try {
     await addDoc(collection(db, "materi", materiId, "sections"), {
-      type: "text",
-      order: 0,
-      title: "Materi",
-      deskripsi: "",
-      rumus: "",
-      contohSoal: "",
-      content: "",
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    });
+  type: "text",
+  order: 0,
+  title: "Materi",
+  deskripsi: "",
+  rumus: "",
+  contohSoal: "",
+  keterangan: "", // ✅
+  content: "",
+  createdAt: serverTimestamp(),
+  updatedAt: serverTimestamp()
+});
+
     toast("Section text dibuat");
   } catch (e) {
     toast("Gagal tambah section: " + (e?.message || "unknown"));
