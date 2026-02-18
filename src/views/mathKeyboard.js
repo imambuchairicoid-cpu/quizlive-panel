@@ -121,10 +121,21 @@ const CATEGORIES = [
 
 // ─── State ───────────────────────────────────────────────────────────────────
 
-let activeInput  = null;
-let activeTab    = 0;
-let keyboardEl   = null;
-let hideTimer    = null;   // ← FIX: pakai timer eksplisit, bukan boolean flag
+let activeInput   = null;
+let activeTab     = 0;
+let keyboardEl    = null;
+let hideTimer     = null;
+
+/**
+ * FIX UTAMA:
+ * Saat tab/simbol di-klik, innerHTML keyboard diganti (renderKeyboard).
+ * Elemen lama hilang dari DOM, sehingga document mousedown handler
+ * mengira klik terjadi di luar keyboard → hideKeyboard() terpanggil.
+ *
+ * Solusi: set flag ini = true sebelum renderKeyboard(),
+ * dan document mousedown handler akan skip hide jika flag aktif.
+ */
+let suppressDocMousedown = false;
 
 // ─── Timer helpers ───────────────────────────────────────────────────────────
 
@@ -163,7 +174,6 @@ function insertAtCursor(el, text) {
 function renderKeyboard() {
   if (!keyboardEl) return;
 
-  // Tandai sedang render → batalkan semua pending hide
   cancelHide();
 
   const cat = CATEGORIES[activeTab];
@@ -193,34 +203,39 @@ function renderKeyboard() {
     </div>
   `;
 
-  // Tab click — pakai mousedown + preventDefault agar textarea tidak blur
+  // ── Tab click ──
   keyboardEl.querySelectorAll(".mk-tab").forEach(btn => {
     btn.addEventListener("mousedown", e => {
-      e.preventDefault();   // cegah textarea kehilangan fokus
-      cancelHide();         // batalkan pending hide
+      e.preventDefault();             // cegah blur textarea
+      suppressDocMousedown = true;    // ← cegah document handler hide keyboard
+      cancelHide();
       activeTab = parseInt(btn.dataset.idx);
-      renderKeyboard();
+      renderKeyboard();               // innerHTML diganti di sini
+      // reset flag setelah event selesai
+      requestAnimationFrame(() => { suppressDocMousedown = false; });
     });
   });
 
-  // Symbol click
+  // ── Symbol click ──
   keyboardEl.querySelectorAll(".mk-sym").forEach(btn => {
     btn.addEventListener("mousedown", e => {
-      e.preventDefault();   // cegah textarea kehilangan fokus
+      e.preventDefault();
+      suppressDocMousedown = true;
       cancelHide();
       insertAtCursor(activeInput, decodeURIComponent(btn.dataset.val));
       btn.classList.add("mk-sym-flash");
       setTimeout(() => btn.classList.remove("mk-sym-flash"), 200);
+      requestAnimationFrame(() => { suppressDocMousedown = false; });
     });
   });
 
-  // Tombol close — ini boleh menyebabkan blur
+  // ── Close ──
   keyboardEl.querySelector(".mk-close").addEventListener("click", () => {
     hideKeyboard();
   });
 }
 
-// ─── Posisi keyboard di bawah / atas elemen aktif ────────────────────────────
+// ─── Posisi keyboard ─────────────────────────────────────────────────────────
 
 function positionKeyboard(el) {
   if (!keyboardEl || !el) return;
@@ -239,7 +254,6 @@ function positionKeyboard(el) {
   }
   if (left < 8) left = 8;
 
-  // Kalau mepet bawah → tampil di atas input
   if (top + kbHeight > window.innerHeight + scrollY) {
     top = rect.top + scrollY - kbHeight - 8;
   }
@@ -279,21 +293,20 @@ function createKeyboardEl() {
   keyboardEl.className = "mk-keyboard";
   keyboardEl.setAttribute("aria-label", "Keyboard Simbol Matematika");
 
-  // Mouse masuk keyboard → batalkan hide
   keyboardEl.addEventListener("mouseenter", () => cancelHide());
-
-  // Mouse keluar keyboard → jadwalkan hide (hanya kalau textarea sudah tidak fokus)
   keyboardEl.addEventListener("mouseleave", () => {
-    if (document.activeElement !== activeInput) {
-      scheduleHide();
-    }
+    if (document.activeElement !== activeInput) scheduleHide();
   });
 
   document.body.appendChild(keyboardEl);
 
-  // Klik di luar keyboard dan di luar textarea aktif → hide
+  // ── Document mousedown: tutup keyboard jika klik di luar ──
   document.addEventListener("mousedown", e => {
     if (!keyboardEl) return;
+
+    // Skip jika sedang handle klik tab/simbol (innerHTML baru saja diganti)
+    if (suppressDocMousedown) return;
+
     const inKb    = keyboardEl.contains(e.target);
     const inInput = activeInput && activeInput.contains(e.target);
     if (!inKb && !inInput) {
@@ -324,7 +337,6 @@ export function attachKeyboard(el) {
   el.addEventListener("focus", () => showKeyboard(el));
 
   el.addEventListener("blur", () => {
-    // Tunda: beri waktu mousedown di keyboard untuk cancelHide()
     scheduleHide();
   });
 }
@@ -336,7 +348,6 @@ export function initMathKeyboard() {
     .querySelectorAll("textarea, input[type='text'], input:not([type])")
     .forEach(attachKeyboard);
 
-  // Observer untuk elemen yang muncul belakangan (dynamic render sections)
   const observer = new MutationObserver(() => {
     document
       .querySelectorAll("textarea, input[type='text'], input:not([type])")
