@@ -81,6 +81,42 @@ const CATEGORIES = [
     ],
   },
   {
+    label: "Indeks",
+    icon: "a₁",
+    symbols: [
+      // Angka subscript
+      { disp: "₀",   val: "₀" },
+      { disp: "₁",   val: "₁" },
+      { disp: "₂",   val: "₂" },
+      { disp: "₃",   val: "₃" },
+      { disp: "₄",   val: "₄" },
+      { disp: "₅",   val: "₅" },
+      { disp: "₆",   val: "₆" },
+      { disp: "₇",   val: "₇" },
+      { disp: "₈",   val: "₈" },
+      { disp: "₉",   val: "₉" },
+      // Huruf subscript
+      { disp: "ₙ",   val: "ₙ" },
+      { disp: "ₐ",   val: "ₐ" },
+      { disp: "ₓ",   val: "ₓ" },
+      // Kombinasi siap pakai
+      { disp: "a₁",  val: "a₁" },
+      { disp: "a₂",  val: "a₂" },
+      { disp: "a₃",  val: "a₃" },
+      { disp: "aₙ",  val: "aₙ" },
+      { disp: "U₁",  val: "U₁" },
+      { disp: "U₂",  val: "U₂" },
+      { disp: "U₃",  val: "U₃" },
+      { disp: "Uₙ",  val: "Uₙ" },
+      { disp: "x₁",  val: "x₁" },
+      { disp: "x₂",  val: "x₂" },
+      { disp: "xₙ",  val: "xₙ" },
+      { disp: "b₁",  val: "b₁" },
+      { disp: "b₂",  val: "b₂" },
+      { disp: "bₙ",  val: "bₙ" },
+    ],
+  },
+  {
     label: "Operator",
     icon: "≠",
     symbols: [
@@ -121,20 +157,10 @@ const CATEGORIES = [
 
 // ─── State ───────────────────────────────────────────────────────────────────
 
-let activeInput   = null;
-let activeTab     = 0;
-let keyboardEl    = null;
-let hideTimer     = null;
-
-/**
- * FIX UTAMA:
- * Saat tab/simbol di-klik, innerHTML keyboard diganti (renderKeyboard).
- * Elemen lama hilang dari DOM, sehingga document mousedown handler
- * mengira klik terjadi di luar keyboard → hideKeyboard() terpanggil.
- *
- * Solusi: set flag ini = true sebelum renderKeyboard(),
- * dan document mousedown handler akan skip hide jika flag aktif.
- */
+let activeInput          = null;
+let activeTab            = 0;
+let keyboardEl           = null;
+let hideTimer            = null;
 let suppressDocMousedown = false;
 
 // ─── Timer helpers ───────────────────────────────────────────────────────────
@@ -206,12 +232,11 @@ function renderKeyboard() {
   // ── Tab click ──
   keyboardEl.querySelectorAll(".mk-tab").forEach(btn => {
     btn.addEventListener("mousedown", e => {
-      e.preventDefault();             // cegah blur textarea
-      suppressDocMousedown = true;    // ← cegah document handler hide keyboard
+      e.preventDefault();
+      suppressDocMousedown = true;
       cancelHide();
       activeTab = parseInt(btn.dataset.idx);
-      renderKeyboard();               // innerHTML diganti di sini
-      // reset flag setelah event selesai
+      renderKeyboard();
       requestAnimationFrame(() => { suppressDocMousedown = false; });
     });
   });
@@ -300,13 +325,9 @@ function createKeyboardEl() {
 
   document.body.appendChild(keyboardEl);
 
-  // ── Document mousedown: tutup keyboard jika klik di luar ──
   document.addEventListener("mousedown", e => {
     if (!keyboardEl) return;
-
-    // Skip jika sedang handle klik tab/simbol (innerHTML baru saja diganti)
     if (suppressDocMousedown) return;
-
     const inKb    = keyboardEl.contains(e.target);
     const inInput = activeInput && activeInput.contains(e.target);
     if (!inKb && !inInput) {
@@ -335,10 +356,7 @@ export function attachKeyboard(el) {
   el.dataset.mkAttached = "1";
 
   el.addEventListener("focus", () => showKeyboard(el));
-
-  el.addEventListener("blur", () => {
-    scheduleHide();
-  });
+  el.addEventListener("blur",  () => scheduleHide());
 }
 
 // ─── Public: init otomatis seluruh dashboard ─────────────────────────────────
