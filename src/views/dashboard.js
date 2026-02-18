@@ -1,3 +1,4 @@
+import { initMathKeyboard } from "./mathKeyboard";
 // dashboard.js
 import { signOut } from "firebase/auth";
 import {
@@ -220,6 +221,7 @@ export function showDashboard(role) {
   qs("#materiSearch").addEventListener("input", () => renderMateriList());
 
   listenMateriList();
+  initMathKeyboard();
 }
 
 function listenMateriList() {
