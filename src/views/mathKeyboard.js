@@ -121,10 +121,27 @@ const CATEGORIES = [
 
 // ─── State ───────────────────────────────────────────────────────────────────
 
-let activeInput = null;   // textarea/input yang sedang fokus
-let activeTab   = 0;      // index kategori aktif
-let keyboardEl  = null;   // elemen DOM keyboard
-let isMouseInKb = false;  // mencegah keyboard tutup saat klik tombol simbol
+let activeInput  = null;
+let activeTab    = 0;
+let keyboardEl   = null;
+let hideTimer    = null;   // ← FIX: pakai timer eksplisit, bukan boolean flag
+
+// ─── Timer helpers ───────────────────────────────────────────────────────────
+
+function scheduleHide() {
+  cancelHide();
+  hideTimer = setTimeout(() => {
+    hideTimer = null;
+    hideKeyboard();
+  }, 220);
+}
+
+function cancelHide() {
+  if (hideTimer !== null) {
+    clearTimeout(hideTimer);
+    hideTimer = null;
+  }
+}
 
 // ─── Insert simbol ke posisi kursor ──────────────────────────────────────────
 
@@ -138,14 +155,17 @@ function insertAtCursor(el, text) {
   const pos    = start + text.length;
   el.setSelectionRange(pos, pos);
   el.focus();
-  // trigger supaya listener lain tahu value berubah
   el.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-// ─── Render ulang isi keyboard ───────────────────────────────────────────────
+// ─── Render isi keyboard ─────────────────────────────────────────────────────
 
 function renderKeyboard() {
   if (!keyboardEl) return;
+
+  // Tandai sedang render → batalkan semua pending hide
+  cancelHide();
+
   const cat = CATEGORIES[activeTab];
 
   keyboardEl.innerHTML = `
@@ -173,10 +193,11 @@ function renderKeyboard() {
     </div>
   `;
 
-  // Tab click
+  // Tab click — pakai mousedown + preventDefault agar textarea tidak blur
   keyboardEl.querySelectorAll(".mk-tab").forEach(btn => {
     btn.addEventListener("mousedown", e => {
-      e.preventDefault();
+      e.preventDefault();   // cegah textarea kehilangan fokus
+      cancelHide();         // batalkan pending hide
       activeTab = parseInt(btn.dataset.idx);
       renderKeyboard();
     });
@@ -185,25 +206,25 @@ function renderKeyboard() {
   // Symbol click
   keyboardEl.querySelectorAll(".mk-sym").forEach(btn => {
     btn.addEventListener("mousedown", e => {
-      e.preventDefault();
+      e.preventDefault();   // cegah textarea kehilangan fokus
+      cancelHide();
       insertAtCursor(activeInput, decodeURIComponent(btn.dataset.val));
       btn.classList.add("mk-sym-flash");
       setTimeout(() => btn.classList.remove("mk-sym-flash"), 200);
     });
   });
 
-  // Close
-  keyboardEl.querySelector(".mk-close").addEventListener("mousedown", e => {
-    e.preventDefault();
+  // Tombol close — ini boleh menyebabkan blur
+  keyboardEl.querySelector(".mk-close").addEventListener("click", () => {
     hideKeyboard();
   });
 }
 
-// ─── Posisikan keyboard di bawah elemen aktif ────────────────────────────────
+// ─── Posisi keyboard di bawah / atas elemen aktif ────────────────────────────
 
 function positionKeyboard(el) {
   if (!keyboardEl || !el) return;
-  const rect  = el.getBoundingClientRect();
+  const rect    = el.getBoundingClientRect();
   const scrollY = window.scrollY;
   const scrollX = window.scrollX;
 
@@ -213,13 +234,12 @@ function positionKeyboard(el) {
   const kbWidth  = 480;
   const kbHeight = 270;
 
-  // Jangan keluar layar kanan
   if (left + kbWidth > window.innerWidth + scrollX - 12) {
     left = window.innerWidth + scrollX - kbWidth - 12;
   }
   if (left < 8) left = 8;
 
-  // Jangan keluar layar bawah → tampil di atas input
+  // Kalau mepet bawah → tampil di atas input
   if (top + kbHeight > window.innerHeight + scrollY) {
     top = rect.top + scrollY - kbHeight - 8;
   }
@@ -232,6 +252,7 @@ function positionKeyboard(el) {
 
 function showKeyboard(el) {
   activeInput = el;
+  cancelHide();
   if (!keyboardEl) createKeyboardEl();
   renderKeyboard();
   positionKeyboard(el);
@@ -247,7 +268,6 @@ function hideKeyboard() {
 // ─── Buat elemen keyboard (sekali saja) ──────────────────────────────────────
 
 function createKeyboardEl() {
-  // Inject CSS
   if (!document.getElementById("mk-style")) {
     const style = document.createElement("style");
     style.id    = "mk-style";
@@ -256,23 +276,32 @@ function createKeyboardEl() {
   }
 
   keyboardEl = document.createElement("div");
-  keyboardEl.className   = "mk-keyboard";
+  keyboardEl.className = "mk-keyboard";
   keyboardEl.setAttribute("aria-label", "Keyboard Simbol Matematika");
-  keyboardEl.setAttribute("role", "dialog");
 
-  keyboardEl.addEventListener("mouseenter", () => { isMouseInKb = true;  });
-  keyboardEl.addEventListener("mouseleave", () => { isMouseInKb = false; });
+  // Mouse masuk keyboard → batalkan hide
+  keyboardEl.addEventListener("mouseenter", () => cancelHide());
+
+  // Mouse keluar keyboard → jadwalkan hide (hanya kalau textarea sudah tidak fokus)
+  keyboardEl.addEventListener("mouseleave", () => {
+    if (document.activeElement !== activeInput) {
+      scheduleHide();
+    }
+  });
 
   document.body.appendChild(keyboardEl);
 
-  // Tutup jika klik di luar keyboard
+  // Klik di luar keyboard dan di luar textarea aktif → hide
   document.addEventListener("mousedown", e => {
-    if (keyboardEl && !keyboardEl.contains(e.target) && e.target !== activeInput) {
+    if (!keyboardEl) return;
+    const inKb    = keyboardEl.contains(e.target);
+    const inInput = activeInput && activeInput.contains(e.target);
+    if (!inKb && !inInput) {
+      cancelHide();
       hideKeyboard();
     }
   });
 
-  // Reposisi saat scroll / resize
   window.addEventListener("scroll", () => {
     if (activeInput && keyboardEl.classList.contains("mk-visible")) {
       positionKeyboard(activeInput);
@@ -295,22 +324,19 @@ export function attachKeyboard(el) {
   el.addEventListener("focus", () => showKeyboard(el));
 
   el.addEventListener("blur", () => {
-    // Tunda 150ms supaya klik tombol keyboard sempat diproses dulu
-    setTimeout(() => {
-      if (!isMouseInKb) hideKeyboard();
-    }, 150);
+    // Tunda: beri waktu mousedown di keyboard untuk cancelHide()
+    scheduleHide();
   });
 }
 
-// ─── Public: init otomatis ke seluruh dashboard ───────────────────────────────
+// ─── Public: init otomatis seluruh dashboard ─────────────────────────────────
 
 export function initMathKeyboard() {
-  // Attach ke semua input/textarea yang sudah ada
   document
     .querySelectorAll("textarea, input[type='text'], input:not([type])")
     .forEach(attachKeyboard);
 
-  // Observer: attach ke elemen yang muncul belakangan (dynamic render)
+  // Observer untuk elemen yang muncul belakangan (dynamic render sections)
   const observer = new MutationObserver(() => {
     document
       .querySelectorAll("textarea, input[type='text'], input:not([type])")
@@ -326,7 +352,6 @@ export function initMathKeyboard() {
 // ─── CSS ─────────────────────────────────────────────────────────────────────
 
 const MK_CSS = `
-/* ── Keyboard container ── */
 .mk-keyboard {
   position: absolute;
   z-index: 9999;
@@ -349,7 +374,6 @@ const MK_CSS = `
   pointer-events: auto;
 }
 
-/* ── Header ── */
 .mk-header {
   display: flex;
   align-items: center;
@@ -380,7 +404,6 @@ const MK_CSS = `
   color: #1A2B3C;
 }
 
-/* ── Tabs ── */
 .mk-tabs {
   display: flex;
   gap: 3px;
@@ -432,7 +455,6 @@ const MK_CSS = `
   opacity: .8;
 }
 
-/* ── Symbol grid ── */
 .mk-grid {
   display: flex;
   flex-wrap: wrap;
@@ -483,7 +505,6 @@ const MK_CSS = `
   box-shadow: none;
 }
 
-/* ── Footer ── */
 .mk-footer {
   padding: 6px 14px 8px;
   border-top: 1.5px solid rgba(0,0,0,.06);
@@ -494,7 +515,6 @@ const MK_CSS = `
   color: #A0B0BC;
 }
 
-/* ── Responsive ── */
 @media (max-width: 520px) {
   .mk-keyboard { width: calc(100vw - 20px); }
 }
